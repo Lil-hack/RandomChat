@@ -31,7 +31,7 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=TOKEN)
 dp = Dispatcher(bot)
 
-heroku_start = False
+heroku_start = True
 
 conn = psycopg2.connect(dbname='mydb', user='myuser',
                         password='12345678', host='mydb.clmg1sgw6zpf.eu-west-3.rds.amazonaws.com')
