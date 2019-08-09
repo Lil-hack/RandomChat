@@ -212,7 +212,7 @@ async def registration(message: types.Message):
 
 @dp.message_handler()
 async def main_logic(message: types.Message):
-    # t0 = time.time()
+    t0 = time.time()
 
     data = await get_data(message)
     if data is not None:
@@ -388,8 +388,8 @@ async def main_logic(message: types.Message):
         await bot.send_sticker(message.chat.id, 'CAADAgADsSIAAulVBRjeeCmOKBdM4RYE')
         await bot.send_message(message.chat.id, 'Что-то пошло не так. Скорее всего вы не прошли регистрацию.')
 
-    # t1 = time.time()
-    # print(t1 - t0)
+    t1 = time.time()
+    print(t1 - t0)
 
 
 async def on_startup(dp):
@@ -412,11 +412,11 @@ async def sticker(message: types.sticker):
         if state == 0:
             await bot.send_sticker(id_friend, message.sticker.file_id)
         else:
-            print(message.sticker.file_id)
+            # print(message.sticker.file_id)
             await bot.send_sticker(message.chat.id, 'CAADAgADsSIAAulVBRjeeCmOKBdM4RYE')
             await bot.send_message(message.chat.id, 'Что-то пошло не так.')
     else:
-        print(message.sticker.file_id)
+        # print(message.sticker.file_id)
         await bot.send_sticker(message.chat.id, 'CAADAgADsSIAAulVBRjeeCmOKBdM4RYE')
         await bot.send_message(message.chat.id, 'Что-то пошло не так. Возможно вы не зарегистрированы.')
 
