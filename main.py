@@ -1,30 +1,25 @@
 import logging
 import os
-import re
 
-from aiogram import Bot, types, md
+import psycopg2
+
 from aiogram.utils.executor import start_webhook
 from aiogram import Bot, Dispatcher, executor, types
-from aiogram.types import InputMediaPhoto, InputMediaDocument, KeyboardButton, ReplyKeyboardMarkup, ContentType
-from urllib.request import urlopen
-import json
+from aiogram.types import KeyboardButton, ReplyKeyboardMarkup, ContentType
+
 import threading
 import asyncio
 
 import time
-import datetime
 
-from twilio.rest import Client
+
+from psycopg2 import sql
 
 from name import *
 
-account_sid = 'AC52a194acef951b3b36e94f294d836ae6'
-auth_token = '988090f0870502e26899be8b5aeb41f0'
+TOKEN = '969792461:AAG9ctwOj9ONUK5enPRFOPCwXOU4m1l913M'
 
-TOKEN = '891139186:AAEVLHlMc2dt5SAPKtCeQ-Jli_rnSIyC9eU'
-
-
-WEBHOOK_HOST = 'https://tel-bot-python.herokuapp.com'  # name your app
+WEBHOOK_HOST = 'https://random-friend-bot.herokuapp.com'  # name your app
 WEBHOOK_PATH = '/webhook/'
 WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
 
@@ -35,233 +30,494 @@ logging.basicConfig(level=logging.INFO)
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher(bot)
-admin_id=852450369
-heroku_start=False
 
+heroku_start = False
+
+conn = psycopg2.connect(dbname='mydb', user='myuser',
+                        password='12345678', host='mydb.clmg1sgw6zpf.eu-west-3.rds.amazonaws.com')
 
 
 async def timer_logic():
-    hour = datetime.datetime.now().time().hour+3
-    minute = datetime.datetime.now().time().minute
+    # t0 = time.time()
+    data=await get_all_data()
+    for user in data:
+        # print(user[0])
+        find_data=await search_data(user[0],user[1])
+        if find_data is not None:
 
-    data = await get_data()
-    print(hour,':',minute)
-    for user in data['users']:
-        for time in user['calltime']:
+            await update_data(user[0], 'STATE', 0)
+            await update_data(user[0], 'ID_FRIEND', find_data[0][0])
 
-            if hour==time[0] and minute==time[1]:
+            button = KeyboardButton(B_CLOSE)
+            kb = ReplyKeyboardMarkup(resize_keyboard=True).add(button)
+            if user[1] == 1:
+                await bot.send_message(user[0], T_FIND_BOY, reply_markup=kb)
+                await bot.send_message(user[0], 'Описание: {}'.format(find_data[0][1]))
+            else:
+                await bot.send_message(user[0], T_FIND_GIRL, reply_markup=kb)
+                await bot.send_message(user[0], 'Описание: {}'.format(find_data[0][1]))
 
-                client = Client(account_sid, auth_token)
-                client.calls.create(
-                url='https://ex.ru',
-                to=user['phones'],
-                from_='+12027967603'
-                )
-                user['calltime'].remove(time)
-            # if hour > time[0]:
-            #     user['calltime'].remove(time)
 
-    await save_data(data)
+            await update_data(find_data[0][0], 'STATE', 0)
+            await update_data(find_data[0][0], 'ID_FRIEND', user[0])
 
+            if user[1] == 1:
+                await bot.send_message(find_data[0][0], T_FIND_GIRL, reply_markup=kb)
+                await bot.send_message(find_data[0][0], 'Описание: {}'.format(user[2]))
+            else:
+                await bot.send_message(user[0], T_FIND_BOY, reply_markup=kb)
+                await bot.send_message(user[0], 'Описание: {}'.format(find_data[0][1]))
+
+    #     print(find_data)
+    # print(len(data))
+    #
+    #
+    # print(time.time()-t0)
 
 def timer_start():
-    threading.Timer(60.0, timer_start).start()
+    threading.Timer(300.0, timer_start).start()
 
     try:
-        asyncio.run_coroutine_threadsafe(timer_logic(),bot.loop)
+        asyncio.run_coroutine_threadsafe(timer_logic(), bot.loop)
     except Exception as exc:
         print(f'The coroutine raised an exception: {exc!r}')
 
 
-async def get_data():
-    forward_data = await bot.forward_message(admin_id, admin_id, 4)
-    file_data = await bot.get_file(forward_data.document.file_id)
-    file_url_data = bot.get_file_url(file_data.file_path)
-    json_file= urlopen(file_url_data).read()
-    return json.loads(json_file)
+async def get_data(message):
+    try:
 
-async def save_data(data):
-    with open('data3.json', 'w') as json_file:
-        json.dump(data, json_file)
-    with open('data3.json', 'rb') as f:
-        await bot.edit_message_media(InputMediaDocument(f), admin_id, 4)
+        with conn.cursor() as cursor:
+            conn.autocommit = True
 
+            data = sql.SQL('Select *  from users where id_user={}'
+                           .format(message.chat.id))
+
+            cursor.execute(data)
+            data_user = cursor.fetchall()
+            # print(data_user[0][6])
+        if len(data_user) > 0:
+            return data_user
+        else:
+            return None
+    except Exception as ex:
+        # print(ex)
+        # await bot.send_message(message.chat.id, 'Что-то пошло не так. Мы работаем над данной проблемой.')
+        return None
+
+async def get_all_data():
+    try:
+
+        with conn.cursor() as cursor:
+            conn.autocommit = True
+
+            data = sql.SQL('Select id_user,sex,description from users where id_friend=1')
+
+            cursor.execute(data)
+            data_user = cursor.fetchall()
+
+        if len(data_user) > 0:
+            return data_user
+        else:
+            return None
+    except Exception as ex:
+        print(ex)
+
+        return None
+
+
+async def search_data(id,sex):
+    try:
+
+        with conn.cursor() as cursor:
+            conn.autocommit = True
+
+            data = sql.SQL('Select S.id_user, S.description from users S where distance3(S.latitude,S.longitude,(Select latitude from users where id_user={} ),(Select longitude from users where id_user={} ))<100 AND S.sex!={} AND S.id_friend=1 Order by RANDOM() LIMIT 1'
+                           .format(id,id,sex))
+
+            cursor.execute(data)
+            data_user = cursor.fetchall()
+            # print(data_user)
+        if len(data_user)>0:
+            return data_user
+        else:
+            return None
+    except Exception as ex:
+        print(ex)
+        return None
+
+async def update_data(id,set,item):
+    try:
+
+        with conn.cursor() as cursor:
+            conn.autocommit = True
+
+            update = sql.SQL('UPDATE users SET {} = {} WHERE id_user={}'
+                             .format(set,item,id))
+
+            cursor.execute(update)
+
+    except Exception as ex:
+        print(ex)
+        await bot.send_sticker(id, 'CAADAgADsSIAAulVBRjeeCmOKBdM4RYE')
+        await bot.send_message(id, 'Что-то пошло не так. ')
 
 @dp.message_handler(commands='start')
 async def welcome(message: types.Message):
     button = KeyboardButton(B_REGISTRER)
-    button.request_contact = True
+    button.request_location = True
     kb = ReplyKeyboardMarkup(resize_keyboard=True).add(button)
+
+    await bot.send_sticker(message.chat.id, 'CAADAgADyCIAAulVBRgZbm0FEwO_9hYE')
     await bot.send_message(
         message.chat.id,
-        T_HELLO,
+        T_HELLO.format(message.chat.first_name),
         reply_markup=kb)
-    await bot.send_sticker(message.chat.id, 'CAADBAAD8AIAAlI5kwZeZ9hi6NX9qQI')
 
-
-@dp.message_handler(content_types=ContentType.STICKER)
-async def sticker(message: types.sticker):
-    print(message.sticker)
-    await bot.send_sticker(message.chat.id, 'CAADAgADBgYAAj6IGgvB6clLaXwoAQI')
-
-
-
-
-@dp.message_handler(content_types=ContentType.CONTACT)
+@dp.message_handler(content_types=ContentType.LOCATION)
 async def registration(message: types.Message):
-    print(message.contact.phone_number)
-    t0 = time.time()
+    # t0 = time.time()
+    data = await get_data(message)
+    # print(data)
+    if data is not None:
+        state = data[0][7]
+        if state==8:
+            await update_data(message.chat.id, 'latitude', message.location.latitude)
+            await update_data(message.chat.id, 'longitude', message.location.longitude)
+            await bot.send_sticker(message.chat.id, 'CAADAgADvSIAAulVBRjK14yseIAdlRYE')
+            await bot.send_message(message.chat.id,T_GEO_SUCC)
 
-    metka = False
-    data = await get_data()
-    print(len(data['users']))
-    for user in data['users']:
+    else:
+        try:
 
-        if user['chatid'] == message.chat.id:
-            await bot.send_message(message.chat.id, 'You here')
-            metka = True
-            break
-    if metka == False:
-        data['users'].append({'chatid': message.chat.id,
-                           'phones': message.contact.phone_number,
-                           'state': 0,
-                           'calltime': [[datetime.datetime.now().time().hour+3,datetime.datetime.now().time().minute+1]]})
-        print(str(datetime.datetime.now().time))
-        button0 = KeyboardButton(B_CALL_NOW)
-        button = KeyboardButton(B_CLEAN)
-        button2 = KeyboardButton(B_LIST_CALLS)
-        button3 = KeyboardButton(B_INFO)
-        kb = ReplyKeyboardMarkup(resize_keyboard=True).add(button0).row(button,button2).add(button3)
+            with conn.cursor() as cursor:
+                conn.autocommit = True
 
-        await bot.send_message(message.chat.id, 'Вы удачно зарегистрирвоались', reply_markup=kb)
+                insert = sql.SQL('INSERT INTO users (id_user,latitude, longitude,state ) VALUES ({},{},{},{})'
+                                 .format(message.chat.id, message.location.latitude, message.location.longitude, 1))
 
-        await save_data(data)
+                cursor.execute(insert)
+            button = KeyboardButton(B_MAN)
+            button2=KeyboardButton(B_WOMAN)
+            kb = ReplyKeyboardMarkup(resize_keyboard=True).row(button,button2)
+            await bot.send_message(message.chat.id, T_REG ,reply_markup=kb)
+            await bot.send_sticker(message.chat.id, 'CAADAgADFgIAAjbsGwUrH3k-y6Vv9hYE')
+        except Exception as ex:
+            # print('err'+ex)
+            await bot.send_sticker(message.chat.id, 'CAADAgADsSIAAulVBRjeeCmOKBdM4RYE')
+            await bot.send_message(message.chat.id, 'Что-то пошло не так. Возможно вы уже зарегистрированы.')
 
+    # t1 = time.time()
+    # print(t1 - t0)
 
-    t1 = time.time()
-    print(t1 - t0)
 
 @dp.message_handler()
 async def main_logic(message: types.Message):
+    # t0 = time.time()
 
-    t0 = time.time()
-    # with open('data.json', 'rb') as f:
-    #     print(f)
-    #     await bot.send_document(message.chat.id, f)
+    data = await get_data(message)
+    if data is not None:
+        state=data[0][7]
+        id_friend=data[0][6]
+        description_you=data[0][2]
+        sex=data[0][5]
+        # print(data)
+        if state == 1:
 
-    data = await get_data()
-    metka2=False
-    for user in data['users']:
-        if user['chatid'] == message.chat.id:
-            time_user=[]
-            try:
-                for stroka in message.text.split(':'):
-                    time_user.append(int(re.search(r'\d+',stroka).group()))
+            if message.text==B_MAN:
+                await update_data(message.chat.id,'SEX',1)
+                await update_data(message.chat.id, 'STATE', 2)
+                button = KeyboardButton(B_HELP)
+                kb = ReplyKeyboardMarkup(resize_keyboard=True).add(button)
+                await bot.send_message(message.chat.id, T_DESCR, reply_markup=kb)
+                await bot.send_sticker(message.chat.id, 'CAADAgADEwEAAjbsGwXj2-2f4C8x4BYE')
 
-            except Exception as ex:
-                print(ex)
+            if message.text == B_WOMAN:
+                await update_data(message.chat.id,'SEX', 0)
+                await update_data(message.chat.id, 'STATE', 2)
+                button = KeyboardButton(B_HELP)
+                kb = ReplyKeyboardMarkup(resize_keyboard=True).add(button)
+                await bot.send_message(message.chat.id, T_DESCR, reply_markup=kb)
+                await bot.send_sticker(message.chat.id, 'CAADAgADEwEAAjbsGwXj2-2f4C8x4BYE')
+        if state == 2:
+            if message.text == B_HELP:
+                await bot.send_sticker(message.chat.id, 'CAADAgADdQEAAjbsGwWMu47DIo7j_RYE')
+                await bot.send_message(message.chat.id, T_HELP_DESC)
+            else:
+                await update_data(message.chat.id,'DESCRIPTION','\''+message.text+'\'')
+                await update_data(message.chat.id, 'STATE', 9)
+                button = KeyboardButton(B_SEARCH)
+                button2 = KeyboardButton(B_SETTING)
+                kb = ReplyKeyboardMarkup(resize_keyboard=True).add(button).add(button2)
+                await bot.send_sticker(message.chat.id, 'CAADAgADwCIAAulVBRgzpeElWvFn2RYE')
+                await bot.send_message(message.chat.id, T_SUCCESS, reply_markup=kb)
+        if state == 0:
+            if message.text == B_CLOSE:
+                await update_data(message.chat.id, 'STATE', 9)
+                await update_data(message.chat.id, 'ID_FRIEND', 0)
+                button = KeyboardButton(B_SEARCH)
+                button2 = KeyboardButton(B_SETTING)
+                kb = ReplyKeyboardMarkup(resize_keyboard=True).add(button).add(button2)
+                await bot.send_sticker(message.chat.id, 'CAADAgADYwEAAjbsGwXkTe2zgRvwWBYE')
+                await bot.send_message(message.chat.id, T_CLOSE_CHAT, reply_markup=kb)
 
-            print(time_user)
-            if len(time_user)==1:
-                if time_user[0] > 0 and time_user[0] < 120:
 
-                    new_time = datetime.datetime.now() + datetime.timedelta(minutes=time_user[0])
+                await update_data(id_friend, 'STATE', 9)
+                await update_data(id_friend, 'ID_FRIEND', 0)
+                await bot.send_sticker(id_friend, 'CAADAgADYwEAAjbsGwXkTe2zgRvwWBYE')
+                await bot.send_message(id_friend, T_CLOSE_CHAT, reply_markup=kb)
+            else:
+                await bot.send_message(id_friend, message.text)
+        if state == 9:
+            if message.text == B_SEARCH:
+                data_find=await search_data(message.chat.id,sex)
 
-                    metka_time = False
-                    for time_us in user['calltime']:
-                        if (new_time.time().hour + 3) == time_us[0] and new_time.time().minute == time_us[1]:
-                            await bot.send_message(message.chat.id, 'На данное время у Вас уже записан звонок')
-                            metka_time=True
-                            break
-                    if metka_time==False:
-                        user['calltime'].append([new_time.time().hour + 3, new_time.time().minute])
-                        await save_data(data)
-                        await bot.send_message(message.chat.id,  'Вы добавили звонок на {}:{}'
-                                               .format(str(new_time.time().hour + 3),str(new_time.time().minute)))
+                if data_find is not None:
+                    id_find = data_find[0][0]
+                    description = data_find[0][1]
+                    await update_data(message.chat.id, 'STATE', 0)
+                    await update_data(message.chat.id, 'ID_FRIEND', id_find)
+
+                    button = KeyboardButton(B_CLOSE)
+                    kb = ReplyKeyboardMarkup(resize_keyboard=True).add(button)
+                    if sex==1:
+                        await bot.send_message(message.chat.id, T_FIND_GIRL, reply_markup=kb)
+                        await bot.send_message(message.chat.id, 'Описание: {}'.format(description))
+                    else:
+                        await bot.send_message(message.chat.id, T_FIND_BOY, reply_markup=kb)
+                        await bot.send_message(message.chat.id, 'Описание: {}'.format(description))
+
+                    await update_data(id_find, 'STATE', 0)
+                    await update_data(id_find, 'ID_FRIEND', message.chat.id)
+                    if sex == 1:
+                        await bot.send_message(id_find, T_FIND_BOY, reply_markup=kb)
+                        await bot.send_message(id_find, 'Описание: {}'.format(description_you))
+                    else:
+                        await bot.send_message(id_find, T_FIND_GIRL, reply_markup=kb)
+                        await bot.send_message(id_find, 'Описание: {}'.format(description_you))
                 else:
-                    await bot.send_message(message.chat.id, 'Укажите время от 1 до 120 минут')
-            if len(time_user)==2:
-                if time_user[0] >= 0 and time_user[0] <= 24 and time_user[1] >= 0 and time_user[1] <= 60:
+                    await update_data(message.chat.id,'ID_FRIEND',1)
+                    await update_data(message.chat.id, 'STATE', 6)
+                    button = KeyboardButton(B_STOP)
+                    button2 = KeyboardButton(B_SETTING)
+                    kb = ReplyKeyboardMarkup(resize_keyboard=True).add(button).add(button2)
+                    await bot.send_message(message.chat.id, T_STAY_FIND, reply_markup=kb)
+            if message.text == B_SETTING:
+                await update_data(message.chat.id, 'STATE', 8)
+                button = KeyboardButton(B_GEO)
+                button.request_location = True
+                button2 = KeyboardButton(B_DESCRIPTION)
+                button3 = KeyboardButton(B_INFO)
+                button4 = KeyboardButton(B_BACK)
+                kb = ReplyKeyboardMarkup(resize_keyboard=True).add(button).add(button2).add(button3).add(button4)
+                await bot.send_sticker(message.chat.id, 'CAADAgADuSIAAulVBRioU39rZen8LRYE')
+                await bot.send_message(message.chat.id, T_SETTING, reply_markup=kb)
+        if state == 6:
+            if message.text == B_STOP:
+                await update_data(message.chat.id, 'STATE', 9)
+                await update_data(message.chat.id, 'ID_FRIEND', 0)
+                button = KeyboardButton(B_SEARCH)
+                button2 = KeyboardButton(B_SETTING)
+                kb = ReplyKeyboardMarkup(resize_keyboard=True).add(button).add(button2)
+                await bot.send_message(message.chat.id, T_STOP, reply_markup=kb)
+            if message.text == B_SETTING:
+                await update_data(message.chat.id, 'STATE', 8)
+                button = KeyboardButton(B_GEO)
+                button.request_location = True
+                button2 = KeyboardButton(B_DESCRIPTION)
+                button3 = KeyboardButton(B_INFO)
+                button4 = KeyboardButton(B_BACK)
+                kb = ReplyKeyboardMarkup(resize_keyboard=True).add(button).add(button2).add(button3).add(button4)
+                await bot.send_sticker(message.chat.id, 'CAADAgADuSIAAulVBRioU39rZen8LRYE')
+                await bot.send_message(message.chat.id, T_SETTING, reply_markup=kb)
 
-
-                    metka_time = False
-                    for time_us in user['calltime']:
-                        if time_user[0] == time_us[0] and time_user[1] == time_us[1]:
-                            await bot.send_message(message.chat.id,'На данное время уже запланирован звонок')
-                            metka_time = True
-                            break
-                    if metka_time == False:
-                        user['calltime'].append([time_user[0], time_user[1]])
-                        await save_data(data)
-                        await bot.send_message(message.chat.id, 'Вы добавили звонок на {}:{}'
-                                               .format(str(time_user[0]),str(time_user[1])))
-                else:
-                    await bot.send_message(message.chat.id, 'Вы указали неправильное время. Попробуйте занова.')
-
-
-            if message.text == B_CLEAN:
-                user['calltime'].clear()
-                await save_data(data)
-                await bot.send_message(message.chat.id, 'Все звонки удачно сброшены.')
-
-            if message.text == B_CALL_NOW:
-                client = Client(account_sid, auth_token)
-                client.calls.create(
-                    url='https://ex.ru',
-                    to=user['phones'],
-                    from_='+12027967603'
-                )
-
-            if message.text == B_LIST_CALLS:
-                if len(user['calltime'])==0:
-                    await bot.send_message(message.chat.id, 'У Вас нет запланированных звонков')
-                else:
-                    str_call_list='Запланированные звонки:\n'
-                    for time_call in user['calltime']:
-                        str_call_list+=str(time_call[0])+':'+str(time_call[1])+'\n'
-                    await bot.send_message(message.chat.id, str_call_list)
+        if state == 8:
+            if message.text == B_GEO:
+                pass
+            if message.text == B_DESCRIPTION:
+                await update_data(message.chat.id, 'STATE', 7)
+                button = KeyboardButton(B_HELP)
+                button2 = KeyboardButton(B_BACK)
+                kb = ReplyKeyboardMarkup(resize_keyboard=True).add(button).add(button2)
+                await bot.send_message(message.chat.id, T_DESCR_CHANGE, reply_markup=kb)
             if message.text == B_INFO:
-                await bot.send_message(message.chat.id, 'Инфо тут')
+                await bot.send_sticker(message.chat.id, 'CAADAgADwiIAAulVBRhBZgUAAYnNXoUWBA')
+                await bot.send_message(message.chat.id, T_INFO)
+            if message.text == B_BACK:
+                if id_friend==1:
+                    await update_data(message.chat.id, 'STATE', 6)
+                    button = KeyboardButton(B_STOP)
+                    button2 = KeyboardButton(B_SETTING)
+                    kb = ReplyKeyboardMarkup(resize_keyboard=True).add(button).add(button2)
+                    await bot.send_message(message.chat.id, T_BACK_MAIN, reply_markup=kb)
+                else:
+                    await update_data(message.chat.id, 'STATE', 9)
+                    button = KeyboardButton(B_SEARCH)
+                    button2 = KeyboardButton(B_SETTING)
+                    kb = ReplyKeyboardMarkup(resize_keyboard=True).add(button).add(button2)
+                    await bot.send_message(message.chat.id, T_BACK_MAIN, reply_markup=kb)
+        if state == 7:
+            if message.text == B_BACK:
+                await update_data(message.chat.id, 'STATE', 8)
+                button = KeyboardButton(B_GEO)
+                button.request_location = True
+                button2 = KeyboardButton(B_DESCRIPTION)
+                button3 = KeyboardButton(B_INFO)
+                button4 = KeyboardButton(B_BACK)
+                kb = ReplyKeyboardMarkup(resize_keyboard=True).add(button).add(button2).add(button3).add(button4)
+                await bot.send_message(message.chat.id,T_BACK_DESC, reply_markup=kb)
+
+            else:
+                if message.text == B_HELP:
+                    await bot.send_sticker(message.chat.id, 'CAADAgADdQEAAjbsGwWMu47DIo7j_RYE')
+                    await bot.send_message(message.chat.id, T_HELP_DESC)
+                else:
+                    await update_data(message.chat.id, 'STATE', 8)
+                    await update_data(message.chat.id, 'DESCRIPTION','\''+message.text+'\'')
+                    await bot.send_sticker(message.chat.id, 'CAADAgADvSIAAulVBRjK14yseIAdlRYE')
+                    button = KeyboardButton(B_GEO)
+                    button.request_location = True
+                    button2 = KeyboardButton(B_DESCRIPTION)
+                    button3 = KeyboardButton(B_INFO)
+                    button4 = KeyboardButton(B_BACK)
+                    kb = ReplyKeyboardMarkup(resize_keyboard=True).add(button).add(button2).add(button3).add(button4)
+                    await bot.send_message(message.chat.id, T_DESCR_SUCC, reply_markup=kb)
 
 
-            metka2 = True
-            break
-    if metka2==False:
-        button = KeyboardButton(B_REGISTRER)
-        button.request_contact = True
-        kb = ReplyKeyboardMarkup(resize_keyboard=True).add(button)
-        await bot.send_message(message.chat.id, 'Вы не зарегистрированы, нажмите на кнопку "Регистрация"', reply_markup=kb)
 
-    if message.text == 'clean':
-        with open('data2.json', 'rb') as f:
-            await bot.edit_message_media(InputMediaDocument(f), admin_id, 4)
+    else:
+        await bot.send_sticker(message.chat.id, 'CAADAgADsSIAAulVBRjeeCmOKBdM4RYE')
+        await bot.send_message(message.chat.id, 'Что-то пошло не так. Скорее всего вы не прошли регистрацию.')
 
-    if message.text == 'add':
-        for number in range(100):
-            data['users'].append({'chatid': number,
-                               'phones': 8917,
-                               'state': 0,
-                               'calltime': []})
-
-        with open('data3.json', 'w') as json_file:
-            json.dump(data, json_file)
-        with open('data3.json', 'rb') as f:
-            await bot.edit_message_media(InputMediaDocument(f), admin_id, 4)
-
-    t1 = time.time()
-    print(t1 - t0)
-
-
-
+    # t1 = time.time()
+    # print(t1 - t0)
 
 
 async def on_startup(dp):
     await bot.set_webhook(WEBHOOK_URL)
+    conn = psycopg2.connect(dbname='mydb', user='myuser',
+                            password='12345678', host='mydb.clmg1sgw6zpf.eu-west-3.rds.amazonaws.com')
 
 
 async def on_shutdown(dp):
     # insert code here to run it before shutdown
     pass
+
+@dp.message_handler(content_types=ContentType.STICKER)
+async def sticker(message: types.sticker):
+
+    data = await get_data(message)
+    if data is not None:
+        id_friend = data[0][6]
+        state = data[0][7]
+        if state == 0:
+            await bot.send_sticker(id_friend, message.sticker.file_id)
+        else:
+            print(message.sticker.file_id)
+            await bot.send_sticker(message.chat.id, 'CAADAgADsSIAAulVBRjeeCmOKBdM4RYE')
+            await bot.send_message(message.chat.id, 'Что-то пошло не так.')
+    else:
+        print(message.sticker.file_id)
+        await bot.send_sticker(message.chat.id, 'CAADAgADsSIAAulVBRjeeCmOKBdM4RYE')
+        await bot.send_message(message.chat.id, 'Что-то пошло не так. Возможно вы не зарегистрированы.')
+
+
+@dp.message_handler(content_types=ContentType.PHOTO)
+async def photo(message: types.Message):
+
+    data = await get_data(message)
+    if data is not None:
+        id_friend = data[0][6]
+        state = data[0][7]
+        if state==0:
+            await bot.send_photo(id_friend, message.photo[-1].file_id)
+        else:
+            await bot.send_sticker(message.chat.id, 'CAADAgADsSIAAulVBRjeeCmOKBdM4RYE')
+            await bot.send_message(message.chat.id, 'Что-то пошло не так.')
+    else:
+        await bot.send_sticker(message.chat.id, 'CAADAgADsSIAAulVBRjeeCmOKBdM4RYE')
+        await bot.send_message(message.chat.id, 'Что-то пошло не так. Возможно вы не зарегистрированы.')
+
+@dp.message_handler(content_types=ContentType.VIDEO)
+async def video(message: types.Message):
+
+    data = await get_data(message)
+    if data is not None:
+        id_friend = data[0][6]
+        state = data[0][7]
+        if state==0:
+            await bot.send_video(id_friend, message.video.file_id)
+        else:
+            await bot.send_sticker(message.chat.id, 'CAADAgADsSIAAulVBRjeeCmOKBdM4RYE')
+            await bot.send_message(message.chat.id, 'Что-то пошло не так.')
+    else:
+        await bot.send_sticker(message.chat.id, 'CAADAgADsSIAAulVBRjeeCmOKBdM4RYE')
+        await bot.send_message(message.chat.id, 'Что-то пошло не так. Возможно вы не зарегистрированы.')
+
+@dp.message_handler(content_types=ContentType.DOCUMENT)
+async def document(message: types.Message):
+
+    data = await get_data(message)
+    if data is not None:
+        id_friend = data[0][6]
+        state = data[0][7]
+        if state==0:
+            await bot.send_document(id_friend, message.document.file_id)
+        else:
+            await bot.send_sticker(message.chat.id, 'CAADAgADsSIAAulVBRjeeCmOKBdM4RYE')
+            await bot.send_message(message.chat.id, 'Что-то пошло не так.')
+    else:
+        await bot.send_sticker(message.chat.id, 'CAADAgADsSIAAulVBRjeeCmOKBdM4RYE')
+        await bot.send_message(message.chat.id, 'Что-то пошло не так. Возможно вы не зарегистрированы.')
+
+@dp.message_handler(content_types=ContentType.AUDIO)
+async def audio(message: types.Message):
+
+    data = await get_data(message)
+    if data is not None:
+        id_friend = data[0][6]
+        state = data[0][7]
+        if state==0:
+            await bot.send_audio(id_friend, message.audio.file_id)
+        else:
+            await bot.send_sticker(message.chat.id, 'CAADAgADsSIAAulVBRjeeCmOKBdM4RYE')
+            await bot.send_message(message.chat.id, 'Что-то пошло не так.')
+    else:
+        await bot.send_sticker(message.chat.id, 'CAADAgADsSIAAulVBRjeeCmOKBdM4RYE')
+        await bot.send_message(message.chat.id, 'Что-то пошло не так. Возможно вы не зарегистрированы.')
+
+@dp.message_handler(content_types=ContentType.VOICE)
+async def voice(message: types.Message):
+
+    data = await get_data(message)
+    if data is not None:
+        id_friend = data[0][6]
+        state = data[0][7]
+        if state==0:
+            await bot.send_voice(id_friend, message.voice.file_id)
+        else:
+            await bot.send_sticker(message.chat.id, 'CAADAgADsSIAAulVBRjeeCmOKBdM4RYE')
+            await bot.send_message(message.chat.id, 'Что-то пошло не так.')
+    else:
+        await bot.send_sticker(message.chat.id, 'CAADAgADsSIAAulVBRjeeCmOKBdM4RYE')
+        await bot.send_message(message.chat.id, 'Что-то пошло не так. Возможно вы не зарегистрированы.')
+
+@dp.message_handler(content_types=ContentType.ANIMATION)
+async def gif(message: types.Message):
+
+    data = await get_data(message)
+    if data is not None:
+        id_friend = data[0][6]
+        state = data[0][7]
+        if state==0:
+            await bot.send_animation(id_friend, message.animation.file_id)
+        else:
+            await bot.send_sticker(message.chat.id, 'CAADAgADsSIAAulVBRjeeCmOKBdM4RYE')
+            await bot.send_message(message.chat.id, 'Что-то пошло не так.')
+    else:
+        await bot.send_sticker(message.chat.id, 'CAADAgADsSIAAulVBRjeeCmOKBdM4RYE')
+        await bot.send_message(message.chat.id, 'Что-то пошло не так. Возможно вы не зарегистрированы.')
+
+
 
 
 if __name__ == '__main__':
